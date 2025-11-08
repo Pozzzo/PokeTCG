@@ -1,5 +1,6 @@
 import re
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -12,9 +13,10 @@ from pokemontcgsdk import Card, RestClient, Set
 # Configuración de la API Key de Pokémon TCG SDK
 os.environ["POKEMON_TCG_API_KEY"] = "ef8d7689-cf3e-44fb-9135-37a6d3643edb"
 # Configuración de Google Vision
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"/home/ubuntu/FAST-TRADE/gen-lang-client-0273690567-b1f17b82b8d6.json"
-api_key=os.getenv("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")
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"/home/ubuntu/FAST-TRADE/fasttrade-477621-e1cd09689079.json"
+api_key=os.getenv("e1cd09689079c5785d956caac812eef79d6b0adc")
 app = Flask(__name__)
+CORS(app)
 client = openai.OpenAI(api_key=api_key)
 
 # Diccionario de expansiones
