@@ -186,7 +186,7 @@ def search_trollandtoad(card_name, card_code,expansion_code):
         all_results = []  # 🔹 Lista para acumular los resultados
 
         for variant in search_variants:
-            search_url = f"https://www.trollandtoad.com/category.php?selected-cat=0&search-words={variant}%2F{expansion_code}"
+            search_url = f"https://www.trollandtoad.com/search?q={variant}%2F{expansion_code}"
             
             try:
                 response = requests.get(search_url, headers=headers, timeout=10)
@@ -238,7 +238,7 @@ def search_trollandtoad_promo(nombre_carta,codigo_promo):
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         }
-        search_url = f"https://www.trollandtoad.com/category.php?selected-cat=0&search-words={codigo_promo}"
+        search_url = f"https://www.trollandtoad.com/search?q={codigo_promo}"
         try:
             response = requests.get(search_url, headers=headers, timeout=10)
             response.raise_for_status()  # 🔹 Lanza un error si la respuesta no es 200
