@@ -11,11 +11,14 @@ import openai
 from openai import OpenAI
 from pokemontcgsdk import Card, RestClient, Set
 from dotenv import load_dotenv
+# <--- IMPORTACIÓN AÑADIDA ---
+from concurrent.futures import ThreadPoolExecutor
+
 load_dotenv()
 
 # --- Configuración ---
 pokemon_api_key = os.environ.get("POKEMON_TCG_API_KEY")
-RestClient.configure(pokemon_api_key) # <--- Asegúrate de que la API key esté configurada
+RestClient.configure(pokemon_api_key) 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"/home/ubuntu/gen-lang-client-0273690567-5fc84e7f3052.json"
 client = openai.OpenAI()
 
@@ -40,13 +43,12 @@ def handle_exception_message(e):
     """Decodifica un mensaje de excepción si es de tipo bytes."""
     error_message = str(e)
     try:
-        # Intenta acceder al argumento del error y decodificarlo si es bytes
         if hasattr(e, 'args') and e.args:
             arg = e.args[0]
             if isinstance(arg, bytes):
                 error_message = arg.decode('utf-8', errors='ignore')
     except Exception:
-        pass # Si falla la decodificación, nos quedamos con el str(e) original
+        pass 
     return error_message
 # ---------------------------------------------------------
 
@@ -63,6 +65,7 @@ def detectar_texto_google_vision(image_path):
     return ""
 
 def identificar_nombre_carta(texto_detectado):
+    """Identifica el nombre de la carta usando OpenAI."""
     try:
         response_openai = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -74,11 +77,10 @@ def identificar_nombre_carta(texto_detectado):
         nombre_carta = respuesta_completa.split("**")[1] if len(respuesta_completa.split("**")) > 1 else "No encontrado"       
         return nombre_carta
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         return f"Error: {handle_exception_message(e)}"
 
 def extraer_codigo(texto):
-    """Extrae el código de la carta y el código de expansión del texto."""
+    """Extrae el código de la carta (ej. '234') y el código de expansión (ej. '091')."""
     match = re.search(r'(\S+?)/(\S+)', texto)
     if match:
         codigo_carta, codigo_expansion = match.groups()
@@ -93,7 +95,7 @@ def identificar_expansion_promo(texto):
     for expansion, numero in coincidencias:
         expansion = expansion.lower()
         if expansion in inverse_promos_dict:
-            numero_formateado = numero.zfill(3) # Formatear a 3 dígitos
+            numero_formateado = numero.zfill(3) 
             return f"{expansion}{numero_formateado}", expansion_promos_codes[expansion]
     return None, None
 
@@ -103,7 +105,6 @@ def buscar_carta_promo(card_id):
         carta = Card.find(card_id)
         return carta.set.id, carta.name, carta.number, carta.images.large
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         print(f"Error en buscar_carta_promo: {handle_exception_message(e)}")
         return None, None, None, None
 
@@ -147,7 +148,6 @@ def buscar_carta(codigo_expansion, codigo_carta, nombre_carta):
                 try:
                     cartas_encontradas = Card.where(q=f'set.id:"{expansion_id}" number:"{num}"')
                 except Exception as e:
-                    # <--- CAMBIO: Usar la función ayudante
                     error_msg = handle_exception_message(e)
                     print(f"⚠ Error API TCG (set.id:{expansion_id} num:{num}): {error_msg}")
                     continue 
@@ -160,55 +160,63 @@ def buscar_carta(codigo_expansion, codigo_carta, nombre_carta):
     print(f"No se encontró la carta '{nombre_carta}' ({codigo_carta}) en expansiones detectadas.")
     return None, None, None, None
 
-def search_trollandtoad(card_name, card_code, expansion_code):
-    """Busca precios en Troll and Toad por scraping."""
+# --- MODIFICACIÓN: ACEPTA UNA LISTA DE CÓDIGOS DE EXPANSIÓN ---
+def search_trollandtoad(card_name, card_code, expansion_codes_list):
+    """Busca precios en Troll and Toad probando múltiples códigos de expansión."""
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
         search_variants = [card_code, f"0{card_code}", f"00{card_code}"]
         all_results = []
         
-        if not expansion_code:
-            return {"error": "Búsqueda de Troll cancelada: falta código de expansión."}
+        if not expansion_codes_list:
+            return {"error": "Búsqueda de Troll cancelada: no se proporcionaron códigos de expansión."}
+        
+        # Elimina duplicados (ej. '91' y '091' pueden ser el mismo si el interno es 91)
+        unique_expansion_codes = list(set(expansion_codes_list))
+        print(f"🔎 Buscando en T&T con códigos de expansión: {unique_expansion_codes}")
 
-        for variant in search_variants:
-            search_url = f"https://www.trollandtoad.com/search?q={variant}%2F{expansion_code}"
-            
-            try:
-                response = requests.get(search_url, headers=headers, timeout=10)
-                response.raise_for_status()
-            except requests.RequestException as req_err:
-                # <--- CAMBIO: Usar la función ayudante
-                error_msg = handle_exception_message(req_err)
-                print(f"Error en búsqueda T&T con {variant}: {error_msg}")
+        for expansion_code in unique_expansion_codes:
+            if not expansion_code: # Saltar si uno de los códigos es None o ""
                 continue
+                
+            for variant in search_variants:
+                search_url = f"https://www.trollandtoad.com/search?q={variant}%2F{expansion_code}"
+                
+                try:
+                    response = requests.get(search_url, headers=headers, timeout=10)
+                    response.raise_for_status()
+                except requests.RequestException as req_err:
+                    error_msg = handle_exception_message(req_err)
+                    print(f"Error en búsqueda T&T con {variant}/{expansion_code}: {error_msg}")
+                    continue
 
-            soup = BeautifulSoup(response.content, 'html.parser')
-            card_rows = soup.find_all('div', class_='product-col col-12 p-0 my-1 mx-sm-1 mw-100')
+                soup = BeautifulSoup(response.content, 'html.parser')
+                card_rows = soup.find_all('div', class_='product-col col-12 p-0 my-1 mx-sm-1 mw-100')
 
-            if card_rows:
-                for row in card_rows:
-                    title_div = row.find('div', class_='col-11 prod-title')
-                    card_text = title_div.find('a', class_='card-text') if title_div else None
-                    price_row = row.find('div', class_='row position-relative align-center py-2 m-auto')
-                    price_div = price_row.find('div', class_='col-2 text-center p-1') if price_row else None
+                if card_rows:
+                    for row in card_rows:
+                        title_div = row.find('div', class_='col-11 prod-title')
+                        card_text = title_div.find('a', class_='card-text') if title_div else None
+                        price_row = row.find('div', class_='row position-relative align-center py-2 m-auto')
+                        price_div = price_row.find('div', class_='col-2 text-center p-1') if price_row else None
 
-                    if not (card_text and price_div):
-                        continue
+                        if not (card_text and price_div):
+                            continue
 
-                    card_full_text = card_text.get_text(strip=True)
-                    if card_name and card_name.lower() not in card_full_text.lower():
-                        continue
-                    
-                    card_type = card_full_text.split('-')[-1].strip() if '-' in card_full_text else "Tipo no encontrado"
-                    price = price_div.get_text(strip=True)
-                    
-                    all_results.append({"type": card_type, "price": price})
-
+                        card_full_text = card_text.get_text(strip=True)
+                        if card_name and card_name.lower() not in card_full_text.lower():
+                            continue
+                        
+                        card_type = card_full_text.split('-')[-1].strip() if '-' in card_full_text else "Tipo no encontrado"
+                        price = price_div.get_text(strip=True)
+                        
+                        all_results.append({"type": card_type, "price": price})
+        
+        # Si después de probar todas las combinaciones encontramos algo, lo devolvemos
         if all_results:
             return {"Troll": all_results}
         return {"error": "No se encontraron resultados en Troll and Toad."}
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         return {"error": f"Error en search_trollandtoad: {handle_exception_message(e)}"}
 
 def search_trollandtoad_promo(nombre_carta, codigo_promo):
@@ -222,7 +230,6 @@ def search_trollandtoad_promo(nombre_carta, codigo_promo):
             response = requests.get(search_url, headers=headers, timeout=10)
             response.raise_for_status()
         except requests.RequestException as req_err:
-            # <--- CAMBIO: Usar la función ayudante
             error_msg = handle_exception_message(req_err)
             print(f"Error en búsqueda T&T Promo {codigo_promo}: {error_msg}")
             return {"error": f"Error en búsqueda T&T Promo: {error_msg}"}
@@ -252,7 +259,6 @@ def search_trollandtoad_promo(nombre_carta, codigo_promo):
             return {"cards": all_results}
         return {"error": "No se encontraron resultados en Troll and Toad para la promo."}
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         return {"error": f"Error en search_trollandtoad_promo: {handle_exception_message(e)}"}
 
 def get_tcgplayer_prices(nombre_carta, codigo_carta):
@@ -289,10 +295,8 @@ def get_tcgplayer_prices(nombre_carta, codigo_carta):
             return {"cards": all_results}
         return {"error": "No se encontraron cartas coincidentes en TCGPlayer (Scraping)."}
     except requests.RequestException as req_err:
-        # <--- CAMBIO: Usar la función ayudante
         return {"error": f"Error en la búsqueda con TCGPlayer: {handle_exception_message(req_err)}"}
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         return {"error": f"Error al procesar los resultados de TCGPlayer: {handle_exception_message(e)}"}
 
 
@@ -300,6 +304,7 @@ def tcgplayer_search(expansionf, codigof):
     """Busca precios en TCGPlayer usando el SDK oficial (preferido)."""
     try:
         card_id = f"{expansionf}-{codigof}"
+        print(f"🔎 Buscando en TCGPlayer SDK con ID: {card_id}")
         card = Card.find(card_id)
         if card and hasattr(card, 'tcgplayer') and card.tcgplayer and hasattr(card.tcgplayer, 'prices'):
             prices = card.tcgplayer.prices
@@ -314,23 +319,20 @@ def tcgplayer_search(expansionf, codigof):
             available_prices = {k: v for k, v in market_prices.items() if v is not None}
 
             if available_prices:
-                return available_prices # Devuelve dict
+                return available_prices
             else:
                 return {"error": "No hay precios disponibles (SDK) para esta carta."}
         else:
             return {"error": f"No se encontró información de precios (SDK) para la carta ID '{card_id}'."}
     except Exception as e:
-        # <--- CAMBIO: Usar la función ayudante
         return {"error": f"Error en tcgplayer_search (SDK): {handle_exception_message(e)}"}
 
-# --- Lógica Principal (Rutas) ---
-
+# --- MODIFICACIÓN: USA CONCURRENCIA ---
 def no_promo_card(texto_detectado):
     """Lógica de procesamiento para cartas que NO son promos."""
     nombre_carta = identificar_nombre_carta(texto_detectado)
     print(nombre_carta)
     if not nombre_carta or "Error" in nombre_carta:
-        # Devuelve un error que será capturado por la ruta principal
         return (jsonify({"error": f"No se detectó el nombre de la carta: {nombre_carta}"}), 400)
 
     codigo_carta, codigo_expansion = extraer_codigo(texto_detectado)
@@ -341,13 +343,28 @@ def no_promo_card(texto_detectado):
     expansionf, nombref, codigof, imagenf = buscar_carta(codigo_expansion, codigo_carta, nombre_carta)
 
     if not expansionf:
-        # Devuelve un error si la carta no se encuentra en la API
         return (jsonify({"error": f"No se pudo encontrar la carta '{nombre_carta}' con el código {codigo_carta}/{codigo_expansion} en la API."}), 404)
 
-    trollandtoad_results = search_trollandtoad(nombref, codigof, inverse_expansion_dict.get(expansionf))
-    tcgplayer_results = tcgplayer_search(expansionf, codigof)
+    # --- INICIO DE CAMBIO: CONCURRENCIA ---
+    
+    # 1. Prepara las "posibilidades" para Troll and Toad
+    expansion_number_str = ''.join(filter(str.isdigit, str(codigo_expansion)))
+    internal_expansion_code = str(inverse_expansion_dict.get(expansionf))
+    troll_codes_to_try = list(set([expansion_number_str, internal_expansion_code]))
+
+    # 2. Ejecuta ambas búsquedas al mismo tiempo
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        print("⚡ Ejecutando búsquedas de TCGPlayer y Troll&Toad en paralelo...")
+        future_troll = executor.submit(search_trollandtoad, nombref, codigof, troll_codes_to_try)
+        future_tcg = executor.submit(tcgplayer_search, expansionf, codigof)
+        
+        # 3. Espera y recoge los resultados
+        trollandtoad_results = future_troll.result()
+        tcgplayer_results = future_tcg.result()
+    
+    print("⚡ Búsquedas paralelas completadas.")
+    # --- FIN DE CAMBIO: CONCURRENCIA ---
             
-    # Devuelve los 5 valores si todo salió bien
     return expansionf, nombref, tcgplayer_results, trollandtoad_results, imagenf
 
 @app.route("/process_image", methods=["POST"])
@@ -378,15 +395,12 @@ def procesar_imagen():
             if not codigo_promo or not codigo_exp_promo:
                 print("No se detectó código de promo válido. Intentando como carta normal.")
                 resultado = no_promo_card(texto_detectado)
-                # Comprueba si `no_promo_card` devolvió un error (tupla) o datos (5 valores)
                 if isinstance(resultado, tuple) and len(resultado) == 2 and isinstance(resultado[1], int):
-                     return resultado # Es una respuesta de error (jsonify, status_code)
+                     return resultado
                 expansionf, nombref, tcgplayer_results, trollandtoad_results, imagenf = resultado
             
             else:
                 # --- PROMO DETECTADA CORRECTAMENTE ---
-                trollandtoad_results_promo = search_trollandtoad_promo(nombre_carta, codigo_promo)
-                
                 numero_promo = re.findall(r"\d+", codigo_promo)
                 numero_real_promo = "".join(numero_promo).lstrip("0")
                 if not numero_real_promo: numero_real_promo = "1"
@@ -396,13 +410,24 @@ def procesar_imagen():
                 expansionf, nombref, codigof, imagenf = buscar_carta_promo(card_id)
 
                 if not expansionf:
+                    # Fallback si buscar_carta_promo falla
                     print(f"API SDK falló para {card_id}, usando scraping TCGPlayer...")
                     tcgplayer_results_promo = get_tcgplayer_prices(nombre_carta, numero_real_promo)
+                    trollandtoad_results_promo = search_trollandtoad_promo(nombre_carta, codigo_promo) # Ejecutar T&T de todos modos
                     nombref = nombre_carta
                     expansionf = codigo_exp_promo
                     imagenf = None
                 else:
-                    tcgplayer_results_promo = tcgplayer_search(expansionf, codigof)
+                    # --- INICIO DE CAMBIO: CONCURRENCIA (PROMO) ---
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        print("⚡ Ejecutando búsquedas de TCGPlayer (Promo) y Troll&Toad (Promo) en paralelo...")
+                        future_troll_promo = executor.submit(search_trollandtoad_promo, nombre_carta, codigo_promo)
+                        future_tcg_promo = executor.submit(tcgplayer_search, expansionf, codigof)
+                        
+                        trollandtoad_results_promo = future_troll_promo.result()
+                        tcgplayer_results_promo = future_tcg_promo.result()
+                    print("⚡ Búsquedas paralelas (Promo) completadas.")
+                    # --- FIN DE CAMBIO: CONCURRENCIA (PROMO) ---
 
                 response = {
                     "nombre": nombref,
@@ -416,9 +441,8 @@ def procesar_imagen():
         else:
             # --- LÓGICA NO PROMO ---
             resultado = no_promo_card(texto_detectado)
-            # Comprueba si `no_promo_card` devolvió un error (tupla) o datos (5 valores)
             if isinstance(resultado, tuple) and len(resultado) == 2 and isinstance(resultado[1], int):
-                 return resultado # Es una respuesta de error (jsonify, status_code)
+                 return resultado
             
             expansionf, nombref, tcgplayer_results, trollandtoad_results, imagenf = resultado
             
@@ -432,7 +456,6 @@ def procesar_imagen():
             return jsonify(response)
 
     except Exception as e:
-        # --- BLOQUE CATCH FINAL MEJORADO ---
         error_message = handle_exception_message(e)
         print(f"Error fatal en procesar_imagen: {error_message}")
         return jsonify({"error": f"Error fatal en el servidor: {error_message}"}), 500
