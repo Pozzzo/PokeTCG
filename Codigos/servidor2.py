@@ -1,5 +1,6 @@
 import re
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -36,6 +37,7 @@ expansion_promos_codes = {
     "svp": "svp"
 }
 app = Flask(__name__)
+CORS(app)
 def detectar_texto_google_vision(image_path):
     """Detecta texto en una imagen usando Google Vision API"""
     client = vision.ImageAnnotatorClient()
