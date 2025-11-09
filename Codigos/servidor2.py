@@ -173,8 +173,7 @@ def buscar_carta(codigo_expansion, codigo_carta, nombre_carta):
                 if nombre_carta.lower() in carta.name.lower():
                     return expansion_id, carta.name, carta.number, carta.images.large
 
-    return f"❌ No se encontró la carta '{nombre_carta}' con código {codigo_carta} en las expansiones detectadas."
-
+    return None,None,None,None
 def search_trollandtoad(card_name, card_code,expansion_code):
     try:
         headers = {
@@ -345,21 +344,21 @@ def tcgplayer_search(expansionf, codigof):
 
             # Si hay precios disponibles, devolverlos en JSON
             if available_prices:
-                return jsonify(available_prices)
+                return available_prices
             else:
-                return jsonify({
+                return {
                     "error": "No hay precios disponibles para esta carta."
-                })
+                }
 
         else:
-            return jsonify({
+            return {
                 "error": f"No se encontró información de precios para la carta con ID '{card_id}'."
-            })
+            }
 
     except Exception as e:
-        return jsonify({
+        return {
             "error": f"Error en la búsqueda en TCGPlayer: {e}"
-        })
+        }
 def no_promo_card(texto_detectado):
     nombre_carta = identificar_nombre_carta(texto_detectado)
     print(nombre_carta)
@@ -373,8 +372,13 @@ def no_promo_card(texto_detectado):
 
     # Buscar la carta en la API
     expansionf, nombref, codigof, imagenf = buscar_carta(codigo_expansion, codigo_carta,nombre_carta)
+    # --- VALIDACIÓN AÑADIDA ---
+    # Si buscar_carta devolvió None, significa que no encontró la carta
+    if not expansionf:
+        return jsonify({"error": f"No se pudo encontrar la carta '{nombre_carta}' con el código {codigo_carta}/{codigo_expansion}"}), 404
+    # --- FIN DE VALIDACIÓN ---
     trollandtoad_results = search_trollandtoad(nombref,codigof,inverse_expansion_dict.get(expansionf))
-    tcgplayer_results = tcgplayer_search(expansionf,codigof).json
+    tcgplayer_results = tcgplayer_search(expansionf,codigof)
             # Simplificar la respuesta
     return expansionf,nombref,tcgplayer_results,trollandtoad_results,imagenf
 
@@ -419,7 +423,7 @@ def procesar_imagen():
             card_id = f"{codigo_exp_promo}-{numero_real_promo}"
             card = Card.find(card_id)
             if not card:
-                tcgplayer_results_promo = get_tcgplayer_prices(nombre_carta, numero_real_promo).json
+                tcgplayer_results_promo = get_tcgplayer_prices(nombre_carta, numero_real_promo)
                 if 'error' in tcgplayer_results_promo:
                     return jsonify(tcgplayer_results_promo)
                 else:
@@ -452,7 +456,18 @@ def procesar_imagen():
             return jsonify(response)
 
     except Exception as e:
-        return jsonify({"error": f"Error en el servidor: {str(e)}"}), 500
+        error_message = str(e)
+        try:
+            # Intenta decodificar los argumentos de la excepción si son bytes
+            if hasattr(e, 'args') and e.args:
+                arg = e.args[0]
+                if isinstance(arg, bytes):
+                    error_message = arg.decode('utf-8', errors='ignore')
+        except Exception:
+            pass  # Si falla la decodificación, nos quedamos con el str(e) original
+            
+        # <--- CAMBIO: Devolver el mensaje de error decodificado
+        return jsonify({"error": f"Error en el servidor: {error_message}"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
