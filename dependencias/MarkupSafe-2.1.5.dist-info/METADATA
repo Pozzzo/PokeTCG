@@ -4,6 +4,7 @@ Version: 2.1.5
 Summary: Safely add untrusted strings to HTML/XML markup.
 Home-page: https://palletsprojects.com/p/markupsafe/
 Maintainer: Pallets
+
 Maintainer-email: contact@palletsprojects.com
 License: BSD-3-Clause
 Project-URL: Donate, https://palletsprojects.com/donate
