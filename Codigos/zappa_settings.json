@@ -3,6 +3,7 @@
         "app_function": "app.app",
         "aws_region": "us-est-1",
         "profile_name": "default",
+        
         "project_name": "FASTTRADE",
         "runtime": "python3.9",
         "s3_bucket": "dpazappabucket"  
