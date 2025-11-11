@@ -26,7 +26,7 @@ El backend se ejecuta en una **máquina virtual (EC2 de AWS)** con Python y ento
 
 ---
 
-## ⚙️ Requisitos
+##  Requisitos
 - Acceso SSH a la máquina virtual (clave `.pem`).
 - Python 3.8+ con `venv`.
 - `tmux` instalado (para mantener sesiones activas).
